@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Türkmençe ses terjime -  Online</title>
+    <link href="css/mui.min.css" rel="stylesheet"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        .mui-content {
+          display: flex;          /* 启用Flexbox */
+          flex-direction: column; /* 子元素垂直排列 */
+          align-items: center;    /* 子元素在交叉轴上居中（水平居中） */
+          justify-content: start;/* 子元素在主轴上居中（垂直居中） */
+          height: 100vh;          /* 容器高度为视口高度 */
+        }
+        
+        #record-button {
+          margin-bottom: 1px; /* 按钮下方的间隔 */
+		  background-color: limegreen;
+		  color: white;
+		  border: 0ch;
+        }
+		#clear-button {
+            background-color: #F44336; /* Red for the clear button */
+            margin-top: 10px; /* Space above the clear button */
+			color: white;	/* White text */
+		}
+        
+        #translation-result, #translated-result {
+          margin-top: 20px;    /* 结果框顶部的间隔 */
+          width: 80%;          /* 结果框宽度 */
+          text-align: start;  /* 文本居中对齐 */
+        }
+    </style>
+</head>
+<body>
+    <div class="mui-content"> <!-- 这里的元素会被居中显示 -->
+        <h1>Ses terjime</h1>
+        <div>
+            <label for="input-language-selector">Sözlenýän dil:</label>
+            <select id="input-language-selector">
+                <option value="en-US">Iňlisçe</option>
+                <option value="ru-RU">Rusça</option>
+                <option value="zh-CN">Hytaýça</option>
+                <option value="tr-TR">Türkçe</option>
+                <option value="de-DE">Nemesçe</option>
+            </select>
+        </div>
+        <button id="record-button"><i class="fas fa-microphone"></i> Sesiňizi yazyp başla</button>
+        <div id="translation-result">Sesiň yazgysy:</div>
+        <button id="clear-button"><i class="fas fa-broom"></i> Arassala</button>
+        <div id="translated-result">Terjime:</div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const recordButton = document.getElementById('record-button');
+        const clearButton = document.getElementById('clear-button');
+        const translationResult = document.getElementById('translation-result');
+        const translatedResult = document.getElementById('translated-result');
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        const recognizer = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+        recognizer.lang = document.getElementById('input-language-selector').value;
+        recognizer.interimResults = true; // 实时显示识别结果
+        recognizer.continuous = true; // 持续识别
+
+        document.getElementById('input-language-selector').addEventListener('change', () => {
+            recognizer.lang = document.getElementById('input-language-selector').value;
+        });
+
+        recognizer.onresult = function(event) {
+            const transcript = Array.from(event.results)
+                                .map(result => result[0])
+                                .map(result => result.transcript)
+                                .join('');
+            translationResult.textContent = "识别到的文本: " + transcript;
+        };
+
+        recognizer.onerror = function(event) {
+            console.error("语音识别错误", event.error);
+        };
+
+		recordButton.addEventListener('click', () => {
+			if (!isRecording) {
+				audioChunks = [];
+				translationResult.textContent = '';
+				translatedResult.textContent = '';
+				navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+					mediaRecorder = new MediaRecorder(stream);
+					mediaRecorder.start();
+					isRecording = true;
+					recordButton.textContent = '停止录音';
+					recordButton.classList.add('recording');
+					recognizer.start();
+
+					mediaRecorder.ondataavailable = function(event) {
+						audioChunks.push(event.data);
+					};
+				}).catch(e => {
+					console.error('Error accessing microphone', e);
+				});
+			} else {
+				mediaRecorder.stop();
+				// 注意：onstop 事件中关闭麦克风流
+				mediaRecorder.onstop = function() {
+					isRecording = false;
+					recordButton.textContent = '开始录音';
+					recordButton.classList.remove('recording');
+					recognizer.stop();
+					
+					// 下面是关闭麦克风的代码
+					mediaRecorder.stream.getTracks().forEach(track => track.stop());
+
+					// 翻译文本
+					translateText(translationResult.textContent);
+                };
+            }
+        });
+
+        clearButton.addEventListener('click', function() {
+            audioChunks = [];
+            translationResult.textContent = '  ';
+            translatedResult.textContent = ' Arassalandy';
+        });
+
+        function translateText(text) {
+            const url = "https://aip.baidubce.com/rpc/2.0/mt/texttrans/v1";
+            const params = {
+                from: 'auto',
+                to: 'tuk',
+                q: text,
+                termIds: ""
+            };
+				
+			const accessToken = '24.4364135d4f290da7ffd22c167323925e.2592000.1715789935.282335-61567036'
+            fetch(url + "?access_token=" + accessToken, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(params)
+			}) 
+			.then(response => {
+				if (!response.ok) {
+					throw new Error(`HTTP error! status: ${response.status}`);
+				} else if (!response.headers.get('Content-Type').includes('application/json')) {
+					throw new Error('Not a JSON response');
+				}
+				return response.json();
+			})
+			.then(data => {
+				if (data.error_code) {
+					throw new Error(`API error! code: ${data.error_code}, message: ${data.error_msg}`);
+				} else {
+					document.getElementById('translated-result').textContent = data.result.trans_result[0].dst;
+				}
+			})
+			.catch(error => {
+				console.error('Error translating:', error.message);
+			});
+        }
+    });
+    </script>
+</body>  
+</html>
